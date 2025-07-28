@@ -190,17 +190,13 @@ module drrip_cache #(
                      rrpv_table[set_index][0], rrpv_table[set_index][1], 
                      rrpv_table[set_index][2], rrpv_table[set_index][3],
                      victim_found_comb, selected_victim_way_comb);
-        end else if (victim_state == AGE_ALL) begin
-            // After aging, the RRPV values will be updated next cycle
-            // So we need to capture the search results in the next cycle
-            victim_found_reg <= victim_found_comb;
-            selected_victim_way_reg <= selected_victim_way_comb;
-            $display("Time %0t: POST-AGING SEARCH in set %0d - Updated RRPVs: [%0d,%0d,%0d,%0d], victim_found=%b, selected_way=%0d", 
-                     $time, set_index, 
-                     rrpv_table[set_index][0], rrpv_table[set_index][1], 
-                     rrpv_table[set_index][2], rrpv_table[set_index][3],
-                     victim_found_comb, selected_victim_way_comb);
         end
+        // NOTE: Do not capture search results in AGE_ALL.  The AGE_ALL state
+        // only increments the RRPV counters.  The updated counters will be
+        // evaluated when we transition back to SEARCH_VICTIM on the next
+        // cycle (see FSM changes above).
+        
+        // No additional actions while in AGE_ALL.
     end
     
     // Debug: Print state after aging is committed
@@ -235,18 +231,23 @@ module drrip_cache #(
             end
             
             SEARCH_VICTIM: begin
-              if (!victim_found_reg)
+              // Use the *fresh* combinational search result so that the FSM
+              // reacts immediately in the same cycle.  Relying on
+              // victim_found_reg introduces a one-cycle latency that breaks
+              // the AGE-SEARCH handshake.
+              if (!victim_found_comb)
                      victim_next_state = AGE_ALL;
                 else
                     victim_next_state = VICTIM_FOUND;
             end
             
             AGE_ALL: begin
-                // After aging, check if we now have a victim
-              if (!victim_found_reg)
-                    victim_next_state = AGE_ALL ;
-                else
-                    victim_next_state = VICTIM_FOUND;  // Keep aging until we find a victim
+                // After aging, always re-enter SEARCH_VICTIM state so the
+                // freshly-updated RRPV values are evaluated in a new cycle.
+                // This prevents continually ageing the same set without ever
+                // giving the SEARCH_VICTIM state a chance to see the new
+                // counters.
+                victim_next_state = SEARCH_VICTIM;
             end
             
             VICTIM_FOUND: begin
